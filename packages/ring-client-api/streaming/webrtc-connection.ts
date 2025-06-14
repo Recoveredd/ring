@@ -1,4 +1,4 @@
-import { WebSocket } from 'ws'
+import { WebSocket } from 'undici'
 import { firstValueFrom, interval, ReplaySubject } from 'rxjs'
 import { logDebug, logError } from '../util'
 import { RingCamera } from '../ring-camera'
