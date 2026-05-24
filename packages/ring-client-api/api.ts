@@ -1,6 +1,8 @@
 import {
   clientApi,
+  deviceInfoApi,
   deviceApi,
+  locationInfoApi,
   RefreshTokenAuth,
   RingRestClient,
   SessionOptions,
@@ -11,12 +13,14 @@ import {
   BaseStation,
   BeamBridge,
   CameraData,
+  ChimeModel,
   ChimeData,
   IntercomHandsetAudioData,
   OnvifCameraData,
   ProfileResponse,
   PushNotification,
   PushNotificationAction,
+  RingCameraKind,
   RingDeviceType,
   ThirdPartyGarageDoorOpener,
   UnknownDevice,
@@ -38,6 +42,17 @@ import PushReceiver from '@eneris/push-receiver'
 import { RingIntercom } from './ring-intercom'
 import JSONbig from 'json-bigint'
 import { StreamingConnectionOptions } from './streaming/streaming-connection-base'
+
+const doorbellKinds: Set<string> = new Set(
+  Object.values(RingCameraKind).filter(
+    (k) =>
+      k.startsWith('doorbot') ||
+      k.startsWith('doorbell') ||
+      k.startsWith('lpd_') ||
+      k.startsWith('jbox_') ||
+      k.startsWith('cocoa_doorbell'),
+  ),
+)
 
 export interface RingApiOptions extends SessionOptions {
   locationIds?: string[]
@@ -84,49 +99,56 @@ export class RingBaseApi extends Subscribed {
   }
 
   async fetchRingDevices() {
-    const {
-        doorbots,
-        chimes,
-        authorized_doorbots: authorizedDoorbots,
-        stickup_cams: stickupCams,
-        base_stations: baseStations,
-        beams_bridges: beamBridges,
-        other: otherDevices,
-      } = await this.restClient.request<{
-        doorbots: CameraData[]
-        chimes: ChimeData[]
-        authorized_doorbots: CameraData[]
-        stickup_cams: CameraData[]
-        base_stations: BaseStation[]
-        beams_bridges: BeamBridge[]
-        other: (
+    const { devices } = await this.restClient.request<{
+        devices: (
+          | CameraData
+          | ChimeData
+          | BaseStation
+          | BeamBridge
           | IntercomHandsetAudioData
           | OnvifCameraData
           | ThirdPartyGarageDoorOpener
           | UnknownDevice
         )[]
-      }>({ url: clientApi('ring_devices') }),
+      }>({ url: deviceInfoApi('devices') }),
+      doorbots = [] as CameraData[],
+      authorizedDoorbots = [] as CameraData[],
+      stickupCams = [] as CameraData[],
+      chimes = [] as ChimeData[],
+      baseStations = [] as BaseStation[],
+      beamBridges = [] as BeamBridge[],
       onvifCameras = [] as OnvifCameraData[],
       intercoms = [] as IntercomHandsetAudioData[],
       thirdPartyGarageDoorOpeners = [] as ThirdPartyGarageDoorOpener[],
       unknownDevices = [] as UnknownDevice[]
 
-    otherDevices.forEach((device) => {
-      switch (device.kind) {
-        case RingDeviceType.OnvifCamera:
-          onvifCameras.push(device as OnvifCameraData)
-          break
-        case RingDeviceType.IntercomHandsetAudio:
-          intercoms.push(device as IntercomHandsetAudioData)
-          break
-        case RingDeviceType.ThirdPartyGarageDoorOpener:
-          thirdPartyGarageDoorOpeners.push(device as ThirdPartyGarageDoorOpener)
-          break
-        default:
-          unknownDevices.push(device)
-          break
+    for (const device of devices) {
+      const kind = device.kind as string
+
+      if (doorbellKinds.has(kind)) {
+        if ((device as CameraData).owned === false) {
+          authorizedDoorbots.push(device as CameraData)
+        } else {
+          doorbots.push(device as CameraData)
+        }
+      } else if (kind in ChimeModel) {
+        chimes.push(device as ChimeData)
+      } else if (kind.startsWith('base_station')) {
+        baseStations.push(device as BaseStation)
+      } else if (kind.startsWith('beams_bridge')) {
+        beamBridges.push(device as BeamBridge)
+      } else if (kind === RingDeviceType.OnvifCamera) {
+        onvifCameras.push(device as OnvifCameraData)
+      } else if (kind === RingDeviceType.IntercomHandsetAudio) {
+        intercoms.push(device as IntercomHandsetAudioData)
+      } else if (kind === RingDeviceType.ThirdPartyGarageDoorOpener) {
+        thirdPartyGarageDoorOpeners.push(device as ThirdPartyGarageDoorOpener)
+      } else if (kind in RingCameraKind) {
+        stickupCams.push(device as CameraData)
+      } else {
+        unknownDevices.push(device as UnknownDevice)
       }
-    })
+    }
 
     return {
       doorbots,
@@ -393,7 +415,7 @@ export class RingBaseApi extends Subscribed {
   async fetchRawLocations() {
     const { user_locations: rawLocations } = await this.restClient.request<{
       user_locations: UserLocation[]
-    }>({ url: deviceApi('locations') })
+    }>({ url: locationInfoApi('locations') })
 
     if (!rawLocations) {
       throw new Error(
