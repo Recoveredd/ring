@@ -37,6 +37,8 @@ const defaultRequestOptions: RequestOptions = {
   appApiBaseUrl = 'https://prd-api-us.prd.rings.solutions/api/v1/',
   deviceInfoApiBaseUrl = 'https://api.ring.com/device_info/v3/',
   locationInfoApiBaseUrl = 'https://api.ring.com/location_info/v3/',
+  evmApiBaseUrl = 'https://api.ring.com/evm/v3/',
+  oauthBaseUrl = 'https://oauth.ring.com',
   apiVersion = 11
 
 export function clientApi(path: string) {
@@ -61,6 +63,10 @@ export function deviceInfoApi(path: string) {
 
 export function locationInfoApi(path: string) {
   return locationInfoApiBaseUrl + path
+}
+
+export function evmApi(path: string) {
+  return evmApiBaseUrl + path
 }
 
 export interface ExtendedResponse {

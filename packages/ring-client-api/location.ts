@@ -30,7 +30,6 @@ import {
   SocketIoMessage,
   TicketAsset,
   UserLocation,
-  CameraEventResponse,
   CameraEventOptions,
   HistoryOptions,
   RingDeviceHistoryEvent,
@@ -43,8 +42,8 @@ import {
   disabledLocationModes,
   isWebSocketSupportedAsset,
 } from './ring-types'
-import { appApi, clientApi, RingRestClient } from './rest-client'
-import { getSearchQueryString, RingCamera } from './ring-camera'
+import { appApi, RingRestClient } from './rest-client'
+import { getEventHistory, getSearchQueryString, RingCamera } from './ring-camera'
 import { RingChime } from './ring-chime'
 import { RingDevice } from './ring-device'
 import { RingIntercom } from './ring-intercom'
@@ -464,11 +463,11 @@ export class Location extends Subscribed {
   }
 
   getCameraEvents(options: CameraEventOptions = {}) {
-    return this.restClient.request<CameraEventResponse>({
-      url: clientApi(
-        `locations/${this.id}/events${getSearchQueryString(options)}`
-      ),
-    })
+    return getEventHistory(
+      this.restClient,
+      this.cameras.map((camera) => camera.id),
+      options,
+    )
   }
 
   getAccountMonitoringStatus() {
