@@ -43,7 +43,11 @@ import {
   isWebSocketSupportedAsset,
 } from './ring-types'
 import { appApi, RingRestClient } from './rest-client'
-import { getEventHistory, getSearchQueryString, RingCamera } from './ring-camera'
+import {
+  getEventHistory,
+  getSearchQueryString,
+  RingCamera,
+} from './ring-camera'
 import { RingChime } from './ring-chime'
 import { RingDevice } from './ring-device'
 import { RingIntercom } from './ring-intercom'
@@ -218,7 +222,7 @@ export class Location extends Subscribed {
         ticket: string
       }>({
         url: appApi(
-          `clap/tickets?locationID=${this.id}&enableExtendedEmergencyCellUsage=true&requestedTransport=ws`,
+          `clap/tickets?locationID=${this.id}&enableExtendedEmergencyCellUsage=true&requestedTransport=ws`
         ),
       }),
       supportedAssets = assets.filter(isWebSocketSupportedAsset)
@@ -292,10 +296,10 @@ export class Location extends Subscribed {
           this.onConnected.next(true)
           logInfo('Ring connected to socket.io server')
           assets.forEach((asset) =>
-            this.requestList(deviceListMessageType, asset.uuid),
+            this.requestList(deviceListMessageType, asset.uuid)
           )
         },
-        { once: true },
+        { once: true }
       )
       socket.addEventListener('error', reject, { once: true })
     }).catch(reconnect)
@@ -328,7 +332,7 @@ export class Location extends Subscribed {
       JSON.stringify({
         channel: 'message',
         msg: message,
-      }),
+      })
     )
   }
 
@@ -466,7 +470,7 @@ export class Location extends Subscribed {
     return getEventHistory(
       this.restClient,
       this.cameras.map((camera) => camera.id),
-      options,
+      options
     )
   }
 

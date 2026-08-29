@@ -394,7 +394,7 @@ export interface RingtoneOptions {
       url: string
       checksum: string
       available: string
-    },
+    }
   ]
 }
 

@@ -122,7 +122,7 @@ function formatHealthUpdatedAt(lastUpdateTime: number | undefined) {
 // instead derived from the health data included with the device data
 export function mapCameraHealth(
   id: number,
-  health: Partial<CameraData['health']> | undefined,
+  health: Partial<CameraData['health']> | undefined
 ): CameraHealth | undefined {
   if (!health || !Object.keys(health).length) {
     // Some device types (chimes, for example) have no health data in the
@@ -160,7 +160,7 @@ export function mapCameraHealth(
 export function getEventHistory(
   restClient: RingRestClient,
   sourceIds: (string | number)[],
-  options: CameraEventOptions = {},
+  options: CameraEventOptions = {}
 ) {
   const { limit, kind, state, favorites, olderThanId, pagination_key } =
       options,
@@ -195,7 +195,7 @@ export function getEventHistory(
         })),
         meta: { pagination_key: paginationKey },
         pagination_key: paginationKey,
-      }),
+      })
     )
 }
 
@@ -342,7 +342,7 @@ export class RingCamera extends Subscribed {
           if (!this.canSubscribeToNotifications) {
             logDebug(
               initialData.description +
-                ' is shared with this account without the device_alerts_manage operation, so it cannot be subscribed to ding/motion notifications',
+                ' is shared with this account without the device_alerts_manage operation, so it cannot be subscribed to ding/motion notifications'
             )
             return
           }
