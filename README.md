@@ -2,6 +2,14 @@
 
 This repo contains unofficial packages to enable interaction and automation with the majority of [Ring](https://ring.com/) products
 
+## About this fork
+
+This fork is used by [`Recoveredd/scrypted`](https://github.com/Recoveredd/scrypted) to restore Ring device discovery for shared accounts. Ring's legacy location and device endpoints can return no locations for an account that has been invited to a location, preventing Scrypted from discovering an otherwise accessible doorbell or camera.
+
+The fork adapts the API v3 work from [`dgreif/ring#1749`](https://github.com/dgreif/ring/pull/1749) to the Ring client revision vendored by Scrypted. It uses the v3 location, device, and event endpoints, resolves shared-device operation sets, and preserves Scrypted's streaming-specific changes. It remains necessary until equivalent support is available in the Scrypted dependency and has been verified with shared Ring accounts.
+
+The maintained code is on `master`; the integration history remains available on `ring-shared-locations-v3`.
+
 ## Troubleshooting Issues
 
 If you are having issues, please look for related articles in the [wiki](https://github.com/dgreif/ring/wiki) and search existing [Issues](https://github.com/dgreif/ring/issues) before opening a new Issue/Discussion
