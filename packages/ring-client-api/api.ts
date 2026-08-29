@@ -1,6 +1,7 @@
 import {
   clientApi,
-  deviceApi,
+  deviceInfoApi,
+  locationInfoApi,
   RefreshTokenAuth,
   RingRestClient,
   SessionOptions,
@@ -11,12 +12,14 @@ import {
   BaseStation,
   BeamBridge,
   CameraData,
+  ChimeModel,
   ChimeData,
   IntercomHandsetAudioData,
   OnvifCameraData,
   ProfileResponse,
   PushNotification,
   PushNotificationAction,
+  RingCameraKind,
   RingDeviceType,
   ThirdPartyGarageDoorOpener,
   UnknownDevice,
@@ -39,6 +42,17 @@ import { RingIntercom } from './ring-intercom'
 import JSONbig from 'json-bigint'
 import { StreamingConnectionOptions } from './streaming/streaming-connection-base'
 
+const doorbellKinds: Set<string> = new Set(
+  Object.values(RingCameraKind).filter(
+    (k) =>
+      k.startsWith('doorbot') ||
+      k.startsWith('doorbell') ||
+      k.startsWith('lpd_') ||
+      k.startsWith('jbox_') ||
+      k.startsWith('cocoa_doorbell')
+  )
+)
+
 export interface RingApiOptions extends SessionOptions {
   locationIds?: string[]
   cameraStatusPollingSeconds?: number
@@ -58,7 +72,7 @@ export class RingBaseApi extends Subscribed {
 
   constructor(
     public readonly options: RingApiOptions & RefreshTokenAuth,
-    public readonly streamingConnectionOptions: StreamingConnectionOptions,
+    public readonly streamingConnectionOptions: StreamingConnectionOptions
   ) {
     super()
 
@@ -74,7 +88,7 @@ export class RingBaseApi extends Subscribed {
 
     if (locationIds && !locationIds.length) {
       logError(
-        'Your Ring config has `"locationIds": []`, which means no locations will be used and no devices will be found.',
+        'Your Ring config has `"locationIds": []`, which means no locations will be used and no devices will be found.'
       )
     }
 
@@ -84,49 +98,71 @@ export class RingBaseApi extends Subscribed {
   }
 
   async fetchRingDevices() {
-    const {
-        doorbots,
-        chimes,
-        authorized_doorbots: authorizedDoorbots,
-        stickup_cams: stickupCams,
-        base_stations: baseStations,
-        beams_bridges: beamBridges,
-        other: otherDevices,
-      } = await this.restClient.request<{
-        doorbots: CameraData[]
-        chimes: ChimeData[]
-        authorized_doorbots: CameraData[]
-        stickup_cams: CameraData[]
-        base_stations: BaseStation[]
-        beams_bridges: BeamBridge[]
-        other: (
-          | IntercomHandsetAudioData
-          | OnvifCameraData
-          | ThirdPartyGarageDoorOpener
-          | UnknownDevice
-        )[]
-      }>({ url: clientApi('ring_devices') }),
+    const { devices, device_operation_sets: deviceOperationSets } =
+        await this.restClient.request<{
+          devices: (
+            | CameraData
+            | ChimeData
+            | BaseStation
+            | BeamBridge
+            | IntercomHandsetAudioData
+            | OnvifCameraData
+            | ThirdPartyGarageDoorOpener
+            | UnknownDevice
+          )[]
+          device_operation_sets?: {
+            [operationSet: string]: { [operation: string]: object }
+          }
+        }>({ url: deviceInfoApi('devices') }),
+      doorbots = [] as CameraData[],
+      authorizedDoorbots = [] as CameraData[],
+      stickupCams = [] as CameraData[],
+      chimes = [] as ChimeData[],
+      baseStations = [] as BaseStation[],
+      beamBridges = [] as BeamBridge[],
       onvifCameras = [] as OnvifCameraData[],
       intercoms = [] as IntercomHandsetAudioData[],
       thirdPartyGarageDoorOpeners = [] as ThirdPartyGarageDoorOpener[],
       unknownDevices = [] as UnknownDevice[]
 
-    otherDevices.forEach((device) => {
-      switch (device.kind) {
-        case RingDeviceType.OnvifCamera:
-          onvifCameras.push(device as OnvifCameraData)
-          break
-        case RingDeviceType.IntercomHandsetAudio:
-          intercoms.push(device as IntercomHandsetAudioData)
-          break
-        case RingDeviceType.ThirdPartyGarageDoorOpener:
-          thirdPartyGarageDoorOpeners.push(device as ThirdPartyGarageDoorOpener)
-          break
-        default:
-          unknownDevices.push(device)
-          break
+    for (const device of devices) {
+      // Resolve the operation set the device was tagged with into the list of
+      // operations this account may perform on it.  Devices shared by another
+      // account can be limited to a subset (no device_alerts_manage, for
+      // example, which is required to subscribe to ding/motion notifications)
+      const kind = device.kind as string,
+        operationSet = (device as CameraData).operation_set
+
+      if (operationSet && deviceOperationSets?.[operationSet]) {
+        ;(device as CameraData).operations = Object.keys(
+          deviceOperationSets[operationSet]
+        )
       }
-    })
+
+      if (doorbellKinds.has(kind)) {
+        if ((device as CameraData).owned === false) {
+          authorizedDoorbots.push(device as CameraData)
+        } else {
+          doorbots.push(device as CameraData)
+        }
+      } else if (kind in ChimeModel) {
+        chimes.push(device as ChimeData)
+      } else if (kind.startsWith('base_station')) {
+        baseStations.push(device as BaseStation)
+      } else if (kind.startsWith('beams_bridge')) {
+        beamBridges.push(device as BeamBridge)
+      } else if (kind === RingDeviceType.OnvifCamera) {
+        onvifCameras.push(device as OnvifCameraData)
+      } else if (kind === RingDeviceType.IntercomHandsetAudio) {
+        intercoms.push(device as IntercomHandsetAudioData)
+      } else if (kind === RingDeviceType.ThirdPartyGarageDoorOpener) {
+        thirdPartyGarageDoorOpeners.push(device as ThirdPartyGarageDoorOpener)
+      } else if (kind in RingCameraKind) {
+        stickupCams.push(device as CameraData)
+      } else {
+        unknownDevices.push(device as UnknownDevice)
+      }
+    }
 
     return {
       doorbots,
@@ -157,7 +193,7 @@ export class RingBaseApi extends Subscribed {
   private listenForDeviceUpdates(
     cameras: RingCamera[],
     chimes: RingChime[],
-    intercoms: RingIntercom[],
+    intercoms: RingIntercom[]
   ) {
     const { cameraStatusPollingSeconds } = this.options
     if (!cameraStatusPollingSeconds) {
@@ -165,33 +201,24 @@ export class RingBaseApi extends Subscribed {
     }
     const devices = [...cameras, ...chimes, ...intercoms],
       onDeviceRequestUpdate = merge(
-        ...devices.map((device) => device.onRequestUpdate),
+        ...devices.map((device) => device.onRequestUpdate)
       ),
       onUpdateReceived = new Subject(),
       onPollForStatusUpdate = cameraStatusPollingSeconds
         ? onUpdateReceived.pipe(debounceTime(cameraStatusPollingSeconds * 1000))
         : EMPTY,
-      camerasById = cameras.reduce(
-        (byId, camera) => {
-          byId[camera.id] = camera
-          return byId
-        },
-        {} as { [id: number]: RingCamera },
-      ),
-      chimesById = chimes.reduce(
-        (byId, chime) => {
-          byId[chime.id] = chime
-          return byId
-        },
-        {} as { [id: number]: RingChime },
-      ),
-      intercomsById = intercoms.reduce(
-        (byId, intercom) => {
-          byId[intercom.id] = intercom
-          return byId
-        },
-        {} as { [id: number]: RingIntercom },
-      )
+      camerasById = cameras.reduce((byId, camera) => {
+        byId[camera.id] = camera
+        return byId
+      }, {} as { [id: number]: RingCamera }),
+      chimesById = chimes.reduce((byId, chime) => {
+        byId[chime.id] = chime
+        return byId
+      }, {} as { [id: number]: RingChime }),
+      intercomsById = intercoms.reduce((byId, intercom) => {
+        byId[intercom.id] = intercom
+        return byId
+      }, {} as { [id: number]: RingIntercom })
 
     if (!cameras.length && !chimes.length && !intercoms.length) {
       return
@@ -201,7 +228,7 @@ export class RingBaseApi extends Subscribed {
       merge(onDeviceRequestUpdate, onPollForStatusUpdate)
         .pipe(
           throttleTime(500),
-          switchMap(() => this.fetchRingDevices().catch(() => null)),
+          switchMap(() => this.fetchRingDevices().catch(() => null))
         )
         .subscribe((response) => {
           onUpdateReceived.next(null)
@@ -230,7 +257,7 @@ export class RingBaseApi extends Subscribed {
               intercom.updateData(data)
             }
           })
-        }),
+        })
     )
 
     if (cameraStatusPollingSeconds) {
@@ -240,7 +267,7 @@ export class RingBaseApi extends Subscribed {
 
   private async registerPushReceiver(
     cameras: RingCamera[],
-    intercoms: RingIntercom[],
+    intercoms: RingIntercom[]
   ) {
     const credentials =
         this.restClient._internalOnly_pushNotificationCredentials?.config &&
@@ -290,7 +317,7 @@ export class RingBaseApi extends Subscribed {
               device: {
                 metadata: {
                   ...this.restClient.baseSessionMetadata,
-                  pn_dict_version: '2.0.0',
+                  pn_dict_version: '2.4.0',
                   pn_service: 'fcm',
                 },
                 os: 'android',
@@ -301,7 +328,7 @@ export class RingBaseApi extends Subscribed {
         } catch (e) {
           logError(e)
         }
-      }),
+      })
     )
 
     try {
@@ -317,7 +344,7 @@ export class RingBaseApi extends Subscribed {
       // These are likely duplicates, and we aren't currently storying persistent ids anywhere to avoid re-processing them
       if (Date.now() - startTime < 2000) {
         logInfo(
-          'Ignoring push notification received in first two seconds after starting up',
+          'Ignoring push notification received in first two seconds after starting up'
         )
         return
       }
@@ -329,7 +356,7 @@ export class RingBaseApi extends Subscribed {
           try {
             // If it's a JSON string, parse it into an object
             messageData[p] = JSONbig({ storeAsString: true }).parse(
-              message.data[p] as string,
+              message.data[p] as string
             )
           } catch {
             // Otherwise just assign the value directly
@@ -355,7 +382,7 @@ export class RingBaseApi extends Subscribed {
           ) {
             logDebug(
               'Received v2 push notification with unknown category: ' +
-                eventCategory,
+                eventCategory
             )
             logDebug(JSON.stringify(message))
           }
@@ -393,11 +420,11 @@ export class RingBaseApi extends Subscribed {
   async fetchRawLocations() {
     const { user_locations: rawLocations } = await this.restClient.request<{
       user_locations: UserLocation[]
-    }>({ url: deviceApi('locations') })
+    }>({ url: locationInfoApi('locations') })
 
     if (!rawLocations) {
       throw new Error(
-        'The Ring account which you used to generate a refresh token does not have any associated locations.  Please use an account that has access to at least one location.',
+        'The Ring account which you used to generate a refresh token does not have any associated locations.  Please use an account that has access to at least one location.'
       )
     }
 
@@ -422,7 +449,7 @@ export class RingBaseApi extends Subscribed {
         intercoms,
       } = await this.fetchRingDevices(),
       locationIdsWithHubs = [...baseStations, ...beamBridges].map(
-        (x) => x.location_id,
+        (x) => x.location_id
       ),
       cameras = allCameras.map(
         (data) =>
@@ -433,12 +460,12 @@ export class RingBaseApi extends Subscribed {
               data.kind.startsWith('doorbell'),
             this.restClient,
             this.options.avoidSnapshotBatteryDrain || false,
-            this.streamingConnectionOptions,
-          ),
+            this.streamingConnectionOptions
+          )
       ),
       ringChimes = chimes.map((data) => new RingChime(data, this.restClient)),
       ringIntercoms = intercoms.map(
-        (data) => new RingIntercom(data, this.restClient),
+        (data) => new RingIntercom(data, this.restClient)
       ),
       locations = rawLocations
         .filter((location) => {
@@ -452,24 +479,24 @@ export class RingBaseApi extends Subscribed {
             new Location(
               location,
               cameras.filter(
-                (x) => x.data.location_id === location.location_id,
+                (x) => x.data.location_id === location.location_id
               ),
               ringChimes.filter(
-                (x) => x.data.location_id === location.location_id,
+                (x) => x.data.location_id === location.location_id
               ),
               ringIntercoms.filter(
-                (x) => x.data.location_id === location.location_id,
+                (x) => x.data.location_id === location.location_id
               ),
               {
                 hasHubs: locationIdsWithHubs.includes(location.location_id),
                 hasAlarmBaseStation: baseStations.some(
-                  (station) => station.location_id === location.location_id,
+                  (station) => station.location_id === location.location_id
                 ),
                 locationModePollingSeconds:
                   this.options.locationModePollingSeconds,
               },
-              this.restClient,
-            ),
+              this.restClient
+            )
         )
 
     this.listenForDeviceUpdates(cameras, ringChimes, ringIntercoms)
@@ -493,7 +520,7 @@ export class RingBaseApi extends Subscribed {
     const locations = await this.getLocations()
     return locations.reduce(
       (cameras, location) => [...cameras, ...location.cameras],
-      [] as RingCamera[],
+      [] as RingCamera[]
     )
   }
 
@@ -511,7 +538,7 @@ export class RingBaseApi extends Subscribed {
 
     this.getLocations()
       .then((locations) =>
-        locations.forEach((location) => location.disconnect()),
+        locations.forEach((location) => location.disconnect())
       )
       .catch((e) => {
         logError(e)
@@ -528,7 +555,7 @@ export class RingApi extends RingBaseApi {
       // calling as global.require prevents webpack from picking it up.
       createPeerConnection: () =>
         new (global.require(
-          './streaming/werift-peer-connection',
+          './streaming/werift-peer-connection'
         ).WeriftPeerConnection)(),
     })
   }
